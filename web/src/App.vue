@@ -210,7 +210,7 @@ export default {
       if (!this.configInterval) {
         this.configInterval = setInterval(() => {
           this.buildDashboard();
-        }, 200);
+        }, 333);
       }
     },
     stopConfigPolling() {
