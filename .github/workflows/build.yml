@@ -24,19 +24,27 @@ jobs:
           echo "C_VERSION=${c_version}" >> "$GITHUB_OUTPUT"
 
       - name: Log in to Docker Hub
-        uses: docker/login-action@v2.2.0
+        uses: docker/login-action@v3
         with:
-          registry: registry.hub.docker.com
+          # registry: registry.hub.docker.com
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
 
-      - name: Build Docker image
-        run: |
-          docker build -t ${{ secrets.DOCKER_USERNAME }}/docker-launcher:${{ steps.nbgv-version.outputs.C_VERSION }} .
-          docker tag ${{ secrets.DOCKER_USERNAME }}/docker-launcher:${{ steps.nbgv-version.outputs.C_VERSION }} ${{ secrets.DOCKER_USERNAME }}/docker-launcher:latest
+      # - name: Build Docker image
+      #   run: |
+      #     docker build -t ${{ secrets.DOCKER_USERNAME }}/docker-launcher:${{ steps.nbgv-version.outputs.C_VERSION }} .
+      #     docker tag ${{ secrets.DOCKER_USERNAME }}/docker-launcher:${{ steps.nbgv-version.outputs.C_VERSION }} ${{ secrets.DOCKER_USERNAME }}/docker-launcher:latest
 
-      - name: Push Docker image
-        run: |
-          docker push ${{ secrets.DOCKER_USERNAME }}/docker-launcher:${{ steps.nbgv-version.outputs.C_VERSION }}
-          docker push ${{ secrets.DOCKER_USERNAME }}/docker-launcher:latest
+      # - name: Push Docker image
+      #   run: |
+      #     docker push ${{ secrets.DOCKER_USERNAME }}/docker-launcher:${{ steps.nbgv-version.outputs.C_VERSION }}
+      #     docker push ${{ secrets.DOCKER_USERNAME }}/docker-launcher:latest
 
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          push: true
+          tags: caesay/docker-launcher:latest,caesay/docker-launcher:${{ steps.nbgv-version.outputs.C_VERSION }}
