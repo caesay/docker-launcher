@@ -1,14 +1,10 @@
 <template>
-  <div
-    v-if="config"
-    id="app"
-    :class="[
-      `theme-${config.theme}`,
-      `page-${currentPage}`,
-      isDark ? 'dark' : 'light',
-      !config.footer ? 'no-footer' : '',
-    ]"
-  >
+  <div v-if="config" id="app" :class="[
+    `theme-${config.theme}`,
+    `page-${currentPage}`,
+    isDark ? 'dark' : 'light',
+    !config.footer ? 'no-footer' : '',
+  ]">
     <DynamicTheme v-if="config.colors" :themes="config.colors" />
     <div id="bighead">
       <section v-if="config.header" class="first-line">
@@ -26,32 +22,14 @@
         </div>
       </section>
 
-      <Navbar
-        :open="showMenu"
-        :links="config.links"
-        @navbar-toggle="showMenu = !showMenu"
-      >
-        <DarkMode
-          :default-value="config.defaults.colorTheme"
-          @updated="isDark = $event"
-        />
+      <Navbar :open="showMenu" :links="config.links" @navbar-toggle="showMenu = !showMenu">
+        <DarkMode :default-value="config.defaults.colorTheme" @updated="isDark = $event" />
 
-        <SettingToggle
-          name="vlayout"
-          icon="fa-list"
-          icon-alt="fa-columns"
-          :default-value="config.defaults.layout == 'columns'"
-          @updated="vlayout = $event"
-        />
+        <SettingToggle name="vlayout" icon="fa-list" icon-alt="fa-columns"
+          :default-value="config.defaults.layout == 'columns'" @updated="vlayout = $event" />
 
-        <SearchInput
-          class="navbar-item"
-          :hotkey="searchHotkey()"
-          @input="filterServices($event)"
-          @search-focus="showMenu = true"
-          @search-open="navigateToFirstService"
-          @search-cancel="filterServices()"
-        />
+        <SearchInput class="navbar-item" :hotkey="searchHotkey()" @input="filterServices($event)"
+          @search-focus="showMenu = true" @search-open="navigateToFirstService" @search-cancel="filterServices()" />
       </Navbar>
     </div>
 
@@ -71,12 +49,8 @@
           <!-- Horizontal layout -->
           <div v-if="!vlayout || filter" class="columns is-multiline">
             <template v-for="(group, groupIndex) in services">
-              <h2
-                v-if="group.name"
-                :key="`header-${groupIndex}`"
-                class="column is-full group-title"
-                :class="group.class"
-              >
+              <h2 v-if="group.name" :key="`header-${groupIndex}`" class="column is-full group-title"
+                :class="group.class">
                 <i v-if="group.icon" :class="['fa-fw', group.icon]"></i>
                 <div v-else-if="group.logo" class="group-logo media-left">
                   <figure class="image is-48x48">
@@ -85,30 +59,19 @@
                 </div>
                 {{ group.name }}
               </h2>
-              <Service
-                v-for="(item, index) in group.items"
-                :key="`service-${groupIndex}-${index}`"
-                :item="item"
-                :proxy="config.proxy"
-                :class="[
+              <Service v-for="(item, index) in group.items" :key="`service-${groupIndex}-${index}`" :item="item"
+                :proxy="config.proxy" :class="[
                   'column',
                   `is-${12 / config.columns}`,
                   `${item.class || group.class || ''}`,
-                ]"
-              />
+                ]" />
             </template>
           </div>
 
           <!-- Vertical layout -->
-          <div
-            v-if="!filter && vlayout"
-            class="columns is-multiline layout-vertical"
-          >
-            <div
-              v-for="(group, groupIndex) in services"
-              :key="groupIndex"
-              :class="['column', `is-${12 / config.columns}`]"
-            >
+          <div v-if="!filter && vlayout" class="columns is-multiline layout-vertical">
+            <div v-for="(group, groupIndex) in services" :key="groupIndex"
+              :class="['column', `is-${12 / config.columns}`]">
               <h2 v-if="group.name" class="group-title" :class="group.class">
                 <i v-if="group.icon" :class="['fa-fw', group.icon]"></i>
                 <div v-else-if="group.logo" class="group-logo media-left">
@@ -118,13 +81,8 @@
                 </div>
                 {{ group.name }}
               </h2>
-              <Service
-                v-for="(item, index) in group.items"
-                :key="index"
-                :item="item"
-                :proxy="config.proxy"
-                :class="item.class || group.class"
-              />
+              <Service v-for="(item, index) in group.items" :key="index" :item="item" :proxy="config.proxy"
+                :class="item.class || group.class" />
             </div>
           </div>
         </div>
@@ -133,11 +91,7 @@
 
     <footer class="footer">
       <div class="container">
-        <div
-          v-if="config.footer"
-          class="content has-text-centered"
-          v-html="config.footer"
-        ></div>
+        <div v-if="config.footer" class="content has-text-centered" v-html="config.footer"></div>
       </div>
     </footer>
   </div>
