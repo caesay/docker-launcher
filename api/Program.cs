@@ -47,6 +47,15 @@ if (!String.IsNullOrEmpty(port)) {
 // Use CORS globally
 app.UseCors("AllowAll");
 
+// Disable browser caching globally
+app.Use(async (context, next) =>
+{
+    context.Response.Headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0";
+    context.Response.Headers["Pragma"] = "no-cache";
+    context.Response.Headers["Expires"] = "0";
+    await next();
+});
+
 app.UseDefaultFiles();
 app.UseStaticFiles();
 
