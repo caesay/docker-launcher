@@ -246,7 +246,18 @@ export default {
     getConfig: function (path = "/config.yml") {
       return fetch(path, { redirect: "manual" }).then((response) => {
         if (response.type === "opaqueredirect") {
-          window.location.reload();
+          setTimeout(() => {
+            if ('serviceWorker' in navigator) {
+              navigator.serviceWorker.getRegistrations().then(function (registrations) {
+                for (let registration of registrations) {
+                  registration.unregister();
+                }
+                window.location.reload(true); // force reload after unregister
+              });
+            } else {
+              window.location.reload(true);
+            }
+          }, 1000);
           return;
         }
 
