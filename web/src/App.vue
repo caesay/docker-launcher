@@ -185,6 +185,7 @@ export default {
       isDark: null,
       showMenu: false,
       configInterval: null, // store interval ID
+      configErrorCount: 0, // track consecutive config errors
     };
   },
   computed: {
@@ -210,7 +211,7 @@ export default {
       if (!this.configInterval) {
         this.configInterval = setInterval(() => {
           this.buildDashboard();
-        }, 333);
+        }, 500);
       }
     },
     stopConfigPolling() {
@@ -234,6 +235,7 @@ export default {
     buildDashboard: async function () {
       const defaults = parse(defaultConfig);
       let config;
+      let errorOccurred = false;
       try {
         config = await this.getConfig();
         this.currentPage = window.location.hash.substring(1) || "default";
@@ -244,9 +246,25 @@ export default {
           );
           config = Object.assign(config, pageConfig);
         }
+        // Success: reset error counter
+        this.configErrorCount = 0;
+        this.configNotFound = false;
       } catch (error) {
         console.log(error);
-        config = this.handleErrors("⚠️ Error loading configuration", error);
+        this.configErrorCount = (this.configErrorCount || 0) + 1;
+        errorOccurred = true;
+      }
+      // Only show error if 6 or more consecutive failures
+      if (errorOccurred && this.configErrorCount >= 6) {
+        config = this.handleErrors("⚠️ Error loading configuration", "Failed to load config 6 times in a row.");
+        this.configNotFound = true;
+        console.log("Failed to load config >6 times in a row");
+      } else if (errorOccurred) {
+        // Swallow error: don't update config/services, just return
+        console.log("Swallow error: don't update config/services, just return");
+        return;
+      } else {
+        this.configNotFound = false;
       }
       this.config = merge(defaults, config);
       this.services = this.config.services;
