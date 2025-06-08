@@ -58,6 +58,8 @@ if (!String.IsNullOrEmpty(assetsDir)) {
         });
 }
 
+app.MapGet("/index.html", () => Results.Redirect("/", permanent: false));
+
 app.MapGet(
     "/config.yml",
     async (context) => {
