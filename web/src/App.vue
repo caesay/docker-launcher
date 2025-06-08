@@ -269,6 +269,11 @@ export default {
       this.config = merge(defaults, config);
       this.services = this.config.services;
 
+      // Re-apply search filter if set
+      if (this.filter) {
+        this.filterServices(this.filter);
+      }
+
       document.title =
         this.config.documentTitle ||
         `${this.config.title} | ${this.config.subtitle}`;
