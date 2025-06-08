@@ -291,7 +291,11 @@ export default {
     },
     getConfig: function (path = "/config.yml") {
       return fetch(path, { redirect: "manual" }).then((response) => {
-        console.log("TEST", response);
+        if (response.type === "opaqueredirect") {
+          window.location.reload();
+          return;
+        }
+
         if (response.status == 404 || response.redirected) {
           this.configNotFound = true;
           return {};
@@ -313,15 +317,6 @@ export default {
             }
             return config;
           });
-      }).catch((error) => {
-        // Detect redirect error (302) and reload the page
-        console.log("TEST-ERR", error);
-        // if (error.message && error.message.match(/302|redirect/i)) {
-        //   window.location.reload();
-        //   return Promise.reject(error); // Optionally stop further handling
-        // }
-        // Otherwise, propagate the error
-        throw error;
       });
     },
     matchesFilter: function (item) {
