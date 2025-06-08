@@ -12,34 +12,34 @@ export default defineConfig({
   },
   plugins: [
     vue(),
-    VitePWA({
-      registerType: "autoUpdate",
-      useCredentials: true,
-      manifestFilename: "assets/manifest.json",
-      manifest: {
-        name: "Homer dashboard",
-        short_name: "Homer",
-        description: "Home Server Dashboard",
-        theme_color: "#3367D6",
-        start_url: "../",
-        scope: "../",
-        icons: [
-          {
-            src: "./icons/pwa-192x192.png",
-            sizes: "192x192",
-            type: "image/png",
-          },
-          {
-            src: "./icons/pwa-512x512.png",
-            sizes: "512x512",
-            type: "image/png",
-          },
-        ],
-      },
-      workbox: {
-        navigateFallback: null,
-      },
-    }),
+    // VitePWA({
+    //   registerType: "autoUpdate",
+    //   useCredentials: true,
+    //   manifestFilename: "assets/manifest.json",
+    //   manifest: {
+    //     name: "Homer dashboard",
+    //     short_name: "Homer",
+    //     description: "Home Server Dashboard",
+    //     theme_color: "#3367D6",
+    //     start_url: "../",
+    //     scope: "../",
+    //     icons: [
+    //       {
+    //         src: "./icons/pwa-192x192.png",
+    //         sizes: "192x192",
+    //         type: "image/png",
+    //       },
+    //       {
+    //         src: "./icons/pwa-512x512.png",
+    //         sizes: "512x512",
+    //         type: "image/png",
+    //       },
+    //     ],
+    //   },
+    //   workbox: {
+    //     navigateFallback: null,
+    //   },
+    // }),
   ],
   resolve: {
     alias: {

@@ -247,16 +247,7 @@ export default {
       return fetch(path, { redirect: "manual" }).then((response) => {
         if (response.type === "opaqueredirect") {
           setTimeout(() => {
-            if ('serviceWorker' in navigator) {
-              navigator.serviceWorker.getRegistrations().then(function (registrations) {
-                for (let registration of registrations) {
-                  registration.unregister();
-                }
-                window.location.reload(true); // force reload after unregister
-              });
-            } else {
-              window.location.reload(true);
-            }
+            window.location.reload(true); // force reload after unregister
           }, 1000);
           return;
         }
