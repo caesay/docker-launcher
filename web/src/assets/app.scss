@@ -1,0 +1,12 @@
+@charset "utf-8";
+
+// foncdation
+@import url("@/assets/components/layers.scss");
+@import url("~/bulma/css/bulma.css") layer(framework);
+@import url("@/assets/components/base.scss") layer(base);
+@import url("@/assets/components/highlights.scss") layer(base);
+
+// themes
+@import url("@/assets/themes/classic.scss") layer(theme);
+@import url("@/assets/themes/walkxcode.scss") layer(theme);
+@import url("@/assets/themes/neon.scss") layer(theme);

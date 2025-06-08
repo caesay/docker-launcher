@@ -1,0 +1,8 @@
+.vs
+obj/
+bin/
+node_modules/
+.idea/
+*.DotSettings.user
+template.*.yml
+dist/
