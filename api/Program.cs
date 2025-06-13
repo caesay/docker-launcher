@@ -9,16 +9,15 @@ using YamlDotNet.Serialization.NamingConventions;
 var builder = WebApplication.CreateBuilder(args);
 
 // Add CORS policy
-builder.Services.AddCors(
-    options => {
-        options.AddPolicy(
-            "AllowAll",
-            policy =>
-                policy.AllowAnyOrigin()
-                    .AllowAnyHeader()
-                    .AllowAnyMethod()
-        );
-    });
+builder.Services.AddCors(options => {
+    options.AddPolicy(
+        "AllowAll",
+        policy =>
+            policy.AllowAnyOrigin()
+                .AllowAnyHeader()
+                .AllowAnyMethod()
+    );
+});
 
 var app = builder.Build();
 
@@ -48,8 +47,7 @@ if (!String.IsNullOrEmpty(port)) {
 app.UseCors("AllowAll");
 
 // Disable browser caching globally
-app.Use(async (context, next) =>
-{
+app.Use(async (context, next) => {
     context.Response.Headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0";
     context.Response.Headers["Pragma"] = "no-cache";
     context.Response.Headers["Expires"] = "0";
@@ -112,35 +110,44 @@ app.MapGet(
         foreach (var item in filtered.GroupBy(c => c.Section ?? c.NetworkName)) {
             var sectionName = item.Key;
             var service = homerObj.Services.FirstOrDefault(s => s.Name.EqualsNoCase(sectionName) || $"n-{s.Name}".EqualsNoCase(sectionName));
-            var itemsToAdd = item.Select(
-                i => {
-                    string tagstyle = "";
-                    switch (i.State) {
-                    case "exited":
-                        tagstyle = "is-danger";
-                        break;
-                    case "created":
-                    case "paused":
-                    case "restarting":
-                        tagstyle = "is-warning";
-                        break;
-                    case "running":
-                        tagstyle = "is-success";
-                        break;
-                    default:
-                        tagstyle = "is-info";
-                        break;
-                    }
+            var itemsToAdd = item.Select(i => {
+                string tagstyle = "";
+                switch (i.State) {
+                case "exited":
+                    tagstyle = "is-danger";
+                    break;
+                case "created":
+                case "paused":
+                case "restarting":
+                    tagstyle = "is-warning";
+                    break;
+                case "running":
+                    tagstyle = "is-success";
+                    break;
+                default:
+                    tagstyle = "is-info";
+                    break;
+                }
 
-                    return new Item {
-                        Name = i.Name,
-                        Logo = i.IconUrl,
-                        Subtitle = i.Description,
-                        Tag = i.State,
-                        Tagstyle = tagstyle,
-                        Url = i.GetNavUrl(remoteRoot) ?? "",
-                    };
-                }).ToArray();
+                string fontAwesomeIcon = null;
+                if (String.IsNullOrEmpty(i.IconUrl)) {
+                    fontAwesomeIcon = "fas fa-circle-notch";
+                } else if (i.IconUrl.StartsWithNoCase("fa-")) {
+                    fontAwesomeIcon = $"fas {i.IconUrl}";
+                } else if (i.IconUrl.StartsWithNoCase("fas ") || i.IconUrl.StartsWithNoCase("fab ")) {
+                    fontAwesomeIcon = i.IconUrl;
+                }
+
+                return new Item {
+                    Name = i.Name,
+                    Logo = fontAwesomeIcon == null ? i.IconUrl : null,
+                    Icon = fontAwesomeIcon,
+                    Subtitle = i.Description,
+                    Tag = i.State,
+                    Tagstyle = tagstyle,
+                    Url = i.GetNavUrl(remoteRoot) ?? "",
+                };
+            }).ToArray();
             if (itemsToAdd.Any()) {
                 if (service != null) {
                     service.Items = (service.Items ?? []).Concat(itemsToAdd).ToArray();

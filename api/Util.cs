@@ -31,4 +31,10 @@ public static class Util
     {
         return string.Equals(a, b, StringComparison.OrdinalIgnoreCase);
     }
+    
+    
+    public static bool StartsWithNoCase(this string a, string b)
+    {
+        return string.Equals(a.Substring(0, b.Length), b, StringComparison.OrdinalIgnoreCase);
+    }
 }
