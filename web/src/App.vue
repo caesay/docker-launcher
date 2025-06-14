@@ -244,6 +244,11 @@ export default {
       }
     },
     getConfig: function (path = "/config.yml") {
+      const urlParams = new URLSearchParams(window.location.search);
+      const asParam = urlParams.get('as');
+      if (asParam) {
+        path += `?as=${asParam}`;
+      }
       return fetch(path, { redirect: "manual" }).then((response) => {
         if (response.type === "opaqueredirect") {
           setTimeout(() => {
