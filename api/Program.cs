@@ -77,15 +77,20 @@ app.MapGet(
         var computed = await containers.GetAllContainers();
 
         var authenticatedUser = context.Request.Headers.FirstOrDefault(h => h.Key.EqualsNoCase(userHeaderName)).Value.FirstOrDefault();
-        if (!String.IsNullOrWhiteSpace(impersonateEmail)) {
-            authenticatedUser = impersonateEmail;
-        }
-
+        
         if (String.IsNullOrWhiteSpace(authenticatedUser)) {
             throw new UnauthorizedAccessException("No user has been authenticated");
         }
-
+        
         var isAdmin = adminEmail != null && authenticatedUser.EqualsNoCase(adminEmail);
+
+        if (isAdmin && context.Request.Query.TryGetValue("as", out var asUser) && !String.IsNullOrWhiteSpace(asUser)) {
+            authenticatedUser = asUser;
+            isAdmin = false;
+        } else if (!String.IsNullOrWhiteSpace(impersonateEmail)) {
+            authenticatedUser = impersonateEmail;
+            isAdmin = false;
+        }
 
         var filtered = computed
             .Where(c => c.AllowAllUsers || isAdmin || c.AllowUsers.Any(a => a.EqualsNoCase(authenticatedUser)))
