@@ -175,9 +175,7 @@ app.MapGet(
         }
 
         foreach (var s in homerObj.Services.ToArray()) {
-            if (s.Items?.Any() != true) {
-                homerObj.Services = homerObj.Services.Except([s]).ToArray();
-            } else {
+            if (s.Items?.Any() == true) {
                 var query =
                     from item in s.Items
                     let policy = pomerium.Policy?.FirstOrDefault(p => p.To?.Contains($"/{item.Name}:") == true) ??
@@ -192,6 +190,12 @@ app.MapGet(
                     select item;
 
                 s.Items = query.ToArray();
+            }
+        }
+
+        foreach (var s in homerObj.Services.ToArray()) {
+            if (s.Items?.Any() != true) {
+                homerObj.Services = homerObj.Services.Except([s]).ToArray();
             }
         }
 
