@@ -31,6 +31,7 @@ var impersonateEmail = Environment.GetEnvironmentVariable("DL_IMPERSONATE_EMAIL"
 var adminEmail = Environment.GetEnvironmentVariable("DL_ADMIN_EMAIL");
 var userHeaderName = Environment.GetEnvironmentVariable("DL_AUTH_HEADER") ?? "REMOTE-USER";
 var catchallSectionName = Environment.GetEnvironmentVariable("DL_CATCHALL_SECTION") ?? "Other";
+var hideUncategorized = Environment.GetEnvironmentVariable("DL_HIDE_UNCATEGORIZED")?.Equals("true", StringComparison.OrdinalIgnoreCase) ?? false;
 
 var deserializer = new DeserializerBuilder()
     .IgnoreUnmatchedProperties()
@@ -156,7 +157,7 @@ app.MapGet(
             if (itemsToAdd.Any()) {
                 if (service != null) {
                     service.Items = (service.Items ?? []).Concat(itemsToAdd).ToArray();
-                } else {
+                } else if (!hideUncategorized) {
                     var otherService = homerObj.Services.FirstOrDefault(s => s.Name.EqualsNoCase(catchallSectionName));
                     if (otherService != null) {
                         otherService.Items = (otherService.Items ?? []).Concat(itemsToAdd).ToArray();
