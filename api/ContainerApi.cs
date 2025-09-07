@@ -73,6 +73,7 @@ public class ContainerApi(string remoteRootHost, string dockerSock, string pomCo
             let labelHidden = c.Labels?.Where(l => l.Key.Equals("dashboard.hidden")).Select(l => l.Value).FirstOrDefault()
             let labelPublic = c.Labels?.Where(l => l.Key.Equals("dashboard.public")).Select(l => l.Value).FirstOrDefault()
             let labelUsers = c.Labels?.Where(l => l.Key.Equals("dashboard.users")).Select(l => l.Value).FirstOrDefault()
+            let labelUsersArray = labelUsers != null ? labelUsers.Split([',', ';'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries) : Array.Empty<string>()
             let n = (labelNetwork != null ? networks.Where(n => n.Key == labelNetwork).FirstOrDefault() : networks.FirstOrDefault())
             let name = c.Names.First().TrimStart('/')
             let policy = pomerium.Policy.Where(z => z.To != null).FirstOrDefault(pr => new Uri(pr.To).Host == name)
@@ -87,11 +88,11 @@ public class ContainerApi(string remoteRootHost, string dockerSock, string pomCo
                 IconUrl = labelIcon,
                 NetworkName = n.Key,
                 IpAddress = n.Value?.IPAddress,
-                AllowAllUsers = policy?.allow_any_authenticated_user == true ||
+                AllowAllUsers = labelUsersArray.Length == 0 && (policy?.allow_any_authenticated_user == true ||
                                 policy?.allow_public_unauthenticated_access == true ||
-                                (labelPublic != null && Convert.ToBoolean(labelPublic)),
-                AllowUsers = labelUsers != null
-                    ? labelUsers.Split([',', ';'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                                (labelPublic != null && Convert.ToBoolean(labelPublic))),
+                AllowUsers = labelUsersArray.Length > 0
+                    ? labelUsersArray
                     : policy?.allowed_users ?? [],
                 // NavigateUrl = extraRoute ?? (croute != null ? (launchRoutes ? $"/launch/{name}" : croute) : null),
                 NavigateUrlUnsafe = labelUrl ?? policy?.From,
