@@ -31,7 +31,7 @@ var impersonateEmail = Environment.GetEnvironmentVariable("DL_IMPERSONATE_EMAIL"
 var adminEmail = Environment.GetEnvironmentVariable("DL_ADMIN_EMAIL");
 var userHeaderName = Environment.GetEnvironmentVariable("DL_AUTH_HEADER") ?? "REMOTE-USER";
 var catchallSectionName = Environment.GetEnvironmentVariable("DL_CATCHALL_SECTION") ?? "Other";
-var hideUncategorized = Environment.GetEnvironmentVariable("DL_HIDE_UNCATEGORIZED")?.Equals("true", StringComparison.OrdinalIgnoreCase) ?? false;
+var uncategorizedMode = Environment.GetEnvironmentVariable("DL_UNCATEGORIZED_MODE")?.ToUpperInvariant() ?? "ADMINONLY";
 
 var deserializer = new DeserializerBuilder()
     .IgnoreUnmatchedProperties()
@@ -157,18 +157,28 @@ app.MapGet(
             if (itemsToAdd.Any()) {
                 if (service != null) {
                     service.Items = (service.Items ?? []).Concat(itemsToAdd).ToArray();
-                } else if (!hideUncategorized) {
-                    var otherService = homerObj.Services.FirstOrDefault(s => s.Name.EqualsNoCase(catchallSectionName));
-                    if (otherService != null) {
-                        otherService.Items = (otherService.Items ?? []).Concat(itemsToAdd).ToArray();
-                    } else {
-                        homerObj.Services = homerObj.Services.Concat(
-                        [
-                            new Service() {
-                                Items = itemsToAdd.ToArray(),
-                                Name = sectionName,
-                            }
-                        ]).ToArray();
+                } else {
+                    // Determine if uncategorized items should be shown based on mode
+                    var showUncategorized = uncategorizedMode switch {
+                        "SHOW" => true,
+                        "HIDE" => false,
+                        "ADMINONLY" => isAdmin,
+                        _ => isAdmin // default to ADMINONLY behavior
+                    };
+
+                    if (showUncategorized) {
+                        var otherService = homerObj.Services.FirstOrDefault(s => s.Name.EqualsNoCase(catchallSectionName));
+                        if (otherService != null) {
+                            otherService.Items = (otherService.Items ?? []).Concat(itemsToAdd).ToArray();
+                        } else {
+                            homerObj.Services = homerObj.Services.Concat(
+                            [
+                                new Service() {
+                                    Items = itemsToAdd.ToArray(),
+                                    Name = sectionName,
+                                }
+                            ]).ToArray();
+                        }
                     }
                 }
             }
@@ -181,11 +191,18 @@ app.MapGet(
                     let policy = pomerium.Policy?.FirstOrDefault(p => p.To?.Contains($"/{item.Name}:") == true) ??
                                  pomerium.Policy?.FirstOrDefault(p => p.From?.Contains($"/{item.Name}.") == true) ??
                                  pomerium.Policy?.FirstOrDefault(p => item.Url?.StartsWith(p.From?.TrimEnd('*', '/') ?? "NOT_MATCHED") == true)
+                    // First evaluate Pomerium policy filtering
                     where isAdmin ||
                           policy == null ||
                           policy.allow_any_authenticated_user ||
                           policy.allow_public_unauthenticated_access ||
                           policy.allowed_users?.Any(u => u.EqualsNoCase(authenticatedUser)) == true
+                    // Then apply YAML-level onlyAdmin filtering
+                    where item.OnlyAdmin != true || isAdmin
+                    // Finally apply onlyUser filtering (only enforced when onlyAdmin is not true)
+                    where item.OnlyAdmin == true ||
+                          String.IsNullOrWhiteSpace(item.OnlyUser) ||
+                          item.OnlyUser.EqualsNoCase(authenticatedUser)
                     orderby item.Name
                     select item;
 

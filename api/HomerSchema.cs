@@ -392,6 +392,18 @@ public partial class Item
     /// </summary>
     [JsonProperty("url", NullValueHandling = NullValueHandling.Ignore)]
     public string Url { get; set; }
+
+    /// <summary>
+    /// If true, only show this item to admin users
+    /// </summary>
+    [JsonProperty("onlyAdmin", NullValueHandling = NullValueHandling.Ignore)]
+    public bool? OnlyAdmin { get; set; }
+
+    /// <summary>
+    /// If specified, only show this item to the specified user email (or admins with matching email)
+    /// </summary>
+    [JsonProperty("onlyUser", NullValueHandling = NullValueHandling.Ignore)]
+    public string OnlyUser { get; set; }
 }
 
 /// <summary>
