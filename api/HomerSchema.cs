@@ -400,10 +400,10 @@ public partial class Item
     public bool? OnlyAdmin { get; set; }
 
     /// <summary>
-    /// If specified, only show this item to the specified user email (or admins with matching email)
+    /// If specified, only show this item to the specified user email(s) (or admins with matching email). Supports comma-separated list.
     /// </summary>
-    [JsonProperty("onlyUser", NullValueHandling = NullValueHandling.Ignore)]
-    public string OnlyUser { get; set; }
+    [JsonProperty("onlyUsers", NullValueHandling = NullValueHandling.Ignore)]
+    public string OnlyUsers { get; set; }
 }
 
 /// <summary>

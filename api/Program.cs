@@ -199,10 +199,11 @@ app.MapGet(
                           policy.allowed_users?.Any(u => u.EqualsNoCase(authenticatedUser)) == true
                     // Then apply YAML-level onlyAdmin filtering
                     where item.OnlyAdmin != true || isAdmin
-                    // Finally apply onlyUser filtering (only enforced when onlyAdmin is not true)
+                    // Finally apply onlyUsers filtering (only enforced when onlyAdmin is not true)
                     where item.OnlyAdmin == true ||
-                          String.IsNullOrWhiteSpace(item.OnlyUser) ||
-                          item.OnlyUser.EqualsNoCase(authenticatedUser)
+                          String.IsNullOrWhiteSpace(item.OnlyUsers) ||
+                          item.OnlyUsers.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                              .Any(u => u.EqualsNoCase(authenticatedUser))
                     orderby item.Name
                     select item;
 
