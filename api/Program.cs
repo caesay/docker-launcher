@@ -32,6 +32,7 @@ var adminEmail = Environment.GetEnvironmentVariable("DL_ADMIN_EMAIL");
 var userHeaderName = Environment.GetEnvironmentVariable("DL_AUTH_HEADER") ?? "REMOTE-USER";
 var catchallSectionName = Environment.GetEnvironmentVariable("DL_CATCHALL_SECTION") ?? "Other";
 var uncategorizedMode = Environment.GetEnvironmentVariable("DL_UNCATEGORIZED_MODE")?.ToUpperInvariant() ?? "ADMINONLY";
+var faviconUrl = Environment.GetEnvironmentVariable("DL_FAVICON_URL");
 
 var deserializer = new DeserializerBuilder()
     .IgnoreUnmatchedProperties()
@@ -54,6 +55,28 @@ app.Use(async (context, next) => {
     context.Response.Headers["Expires"] = "0";
     await next();
 });
+
+// Serve modified index.html with custom favicon if configured
+if (!String.IsNullOrEmpty(faviconUrl)) {
+    app.Use(async (context, next) => {
+        if (context.Request.Path == "/" || context.Request.Path.Equals("/index.html", StringComparison.OrdinalIgnoreCase)) {
+            var indexPath = Path.Combine(app.Environment.WebRootPath ?? "wwwroot", "index.html");
+            if (File.Exists(indexPath)) {
+                var html = await File.ReadAllTextAsync(indexPath);
+                // Replace existing favicon links with the configured URL
+                html = System.Text.RegularExpressions.Regex.Replace(
+                    html,
+                    @"<link\s+rel=""icon""[^>]*>",
+                    $@"<link rel=""icon"" href=""{faviconUrl}"">"
+                );
+                context.Response.ContentType = "text/html";
+                await context.Response.WriteAsync(html);
+                return;
+            }
+        }
+        await next();
+    });
+}
 
 app.UseDefaultFiles();
 app.UseStaticFiles();
