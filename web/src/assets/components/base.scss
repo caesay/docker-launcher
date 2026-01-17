@@ -239,6 +239,8 @@
         margin-inline-end: 0.5rem;
         border-radius: 6px;
         overflow: hidden;
+        object-fit: cover !important;
+        height: 100% !important;
       }
 
       .media-content {
