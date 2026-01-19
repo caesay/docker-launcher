@@ -33,6 +33,7 @@ var userHeaderName = Environment.GetEnvironmentVariable("DL_AUTH_HEADER") ?? "RE
 var catchallSectionName = Environment.GetEnvironmentVariable("DL_CATCHALL_SECTION") ?? "Other";
 var uncategorizedMode = Environment.GetEnvironmentVariable("DL_UNCATEGORIZED_MODE")?.ToUpperInvariant() ?? "ADMINONLY";
 var faviconUrl = Environment.GetEnvironmentVariable("DL_FAVICON_URL");
+var logoutUrl = Environment.GetEnvironmentVariable("DL_LOGOUT_URL");
 
 var deserializer = new DeserializerBuilder()
     .IgnoreUnmatchedProperties()
@@ -240,10 +241,28 @@ app.MapGet(
             }
         }
 
+        // Override logout URL if DL_LOGOUT_URL is configured (redirects through /logout to clear cookies)
+        if (!String.IsNullOrEmpty(logoutUrl)) {
+            homerObj.LogoutUrl = "/logout";
+        }
+
         yaml = YamlConvert.SerializeObject(homerObj, Converter.Settings);
 
         await context.Response.WriteAsync(yaml);
     });
+
+// Logout endpoint - clears cookies and redirects to configured URL
+if (!String.IsNullOrEmpty(logoutUrl)) {
+    app.MapGet("/logout", (HttpContext context) => {
+        // Clear all cookies for this domain
+        foreach (var cookie in context.Request.Cookies.Keys) {
+            context.Response.Cookies.Delete(cookie);
+        }
+
+        // Redirect to the configured logout URL
+        return Results.Redirect(logoutUrl, permanent: false);
+    });
+}
 
 app.MapFallbackToFile("index.html");
 

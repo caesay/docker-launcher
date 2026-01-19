@@ -91,6 +91,18 @@ public partial class HomerSchema
     public string Logo { get; set; }
 
     /// <summary>
+    /// URL to redirect to when logout button is clicked. If set, shows a logout button in the UI.
+    /// </summary>
+    [JsonProperty("logoutUrl", NullValueHandling = NullValueHandling.Ignore)]
+    public string LogoutUrl { get; set; }
+
+    /// <summary>
+    /// FontAwesome icon for the logout button. Defaults to fa-user-lock.
+    /// </summary>
+    [JsonProperty("logoutIcon", NullValueHandling = NullValueHandling.Ignore)]
+    public string LogoutIcon { get; set; }
+
+    /// <summary>
     /// Messagebox
     /// </summary>
     [JsonProperty("message", NullValueHandling = NullValueHandling.Ignore)]

@@ -30,6 +30,10 @@
 
         <SearchInput class="navbar-item" :hotkey="searchHotkey()" @input="filterServices($event)"
           @search-focus="showMenu = true" @search-open="navigateToFirstService" @search-cancel="filterServices()" />
+
+        <a v-if="config.logoutUrl" class="navbar-item" :href="config.logoutUrl" title="Logout">
+          <i :class="['fas', config.logoutIcon || 'fa-user-lock']"></i>
+        </a>
       </Navbar>
     </div>
 
