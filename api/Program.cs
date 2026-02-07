@@ -34,6 +34,9 @@ var catchallSectionName = Environment.GetEnvironmentVariable("DL_CATCHALL_SECTIO
 var uncategorizedMode = Environment.GetEnvironmentVariable("DL_UNCATEGORIZED_MODE")?.ToUpperInvariant() ?? "ADMINONLY";
 var faviconUrl = Environment.GetEnvironmentVariable("DL_FAVICON_URL");
 var logoutUrl = Environment.GetEnvironmentVariable("DL_LOGOUT_URL");
+var hypervHost = Environment.GetEnvironmentVariable("DL_HYPERV_HOST");
+var hypervUsername = Environment.GetEnvironmentVariable("DL_HYPERV_USERNAME");
+var hypervPassword = Environment.GetEnvironmentVariable("DL_HYPERV_PASSWORD");
 
 var deserializer = new DeserializerBuilder()
     .IgnoreUnmatchedProperties()
@@ -41,6 +44,16 @@ var deserializer = new DeserializerBuilder()
     .Build();
 
 var containers = new ContainerApi(remoteRoot, dockerSock, pomConfig, deserializer);
+
+HyperVApi hyperv = null;
+if (!String.IsNullOrEmpty(hypervHost) && !String.IsNullOrEmpty(hypervUsername) && !String.IsNullOrEmpty(hypervPassword)) {
+    try {
+        hyperv = new HyperVApi(hypervHost, hypervUsername, hypervPassword,
+            app.Services.GetService<ILogger<HyperVApi>>());
+    } catch (Exception ex) {
+        app.Logger.LogError(ex, "Failed to initialize Hyper-V integration");
+    }
+}
 
 if (!String.IsNullOrEmpty(port)) {
     app.Urls.Add("http://*:" + port);
@@ -205,6 +218,53 @@ app.MapGet(
                         }
                     }
                 }
+            }
+        }
+
+        // Inject Hyper-V VMs for admin users
+        if (hyperv != null && isAdmin) {
+            try {
+                var vms = await hyperv.GetAllVMs();
+                if (vms.Length > 0) {
+                    var vmItems = vms.Select(vm => {
+                        var tagstyle = vm.State switch {
+                            "Running" => "is-success",
+                            "Saved" or "Starting" or "Stopping" or "Paused" or "Saving" or "Reset" => "is-warning",
+                            "Off" or "OffCritical" => "is-danger",
+                            _ => "is-info",
+                        };
+                        var subtitle = vm.State == "Running" && !string.IsNullOrWhiteSpace(vm.IPAddress)
+                            ? vm.IPAddress
+                            : vm.State;
+                        return new Item {
+                            Name = vm.Name,
+                            Icon = "fas fa-server",
+                            Subtitle = subtitle,
+                            Tag = vm.State,
+                            Tagstyle = tagstyle,
+                            Url = "",
+                        };
+                    }).ToArray();
+
+                    var hvService = homerObj.Services.FirstOrDefault(s => s.Name.EqualsNoCase("HyperV"));
+                    if (hvService != null) {
+                        hvService.Items = (hvService.Items ?? []).Concat(vmItems).ToArray();
+                    } else {
+                        var catchallService = homerObj.Services.FirstOrDefault(s => s.Name.EqualsNoCase(catchallSectionName));
+                        if (catchallService != null) {
+                            catchallService.Items = (catchallService.Items ?? []).Concat(vmItems).ToArray();
+                        } else {
+                            homerObj.Services = homerObj.Services.Concat([
+                                new Service {
+                                    Items = vmItems,
+                                    Name = "Hyper-V",
+                                }
+                            ]).ToArray();
+                        }
+                    }
+                }
+            } catch (Exception ex) {
+                app.Logger.LogWarning(ex, "Failed to fetch Hyper-V VMs for dashboard");
             }
         }
 
