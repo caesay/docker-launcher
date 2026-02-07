@@ -233,16 +233,20 @@ app.MapGet(
                             "Off" or "OffCritical" => "is-danger",
                             _ => "is-info",
                         };
-                        var subtitle = vm.State == "Running" && !string.IsNullOrWhiteSpace(vm.IPAddress)
-                            ? vm.IPAddress
+                        var firstIp = vm.IPAddress.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).FirstOrDefault();
+                        var subtitle = vm.State == "Running" && !string.IsNullOrWhiteSpace(firstIp)
+                            ? firstIp
                             : vm.State;
+                        var url = !string.IsNullOrWhiteSpace(firstIp)
+                            ? $"rtsx://rdp%3a%2f%2f{firstIp}?using=uri&credential=HiveVM"
+                            : "";
                         return new Item {
                             Name = vm.Name,
                             Icon = "fas fa-server",
                             Subtitle = subtitle,
                             Tag = vm.State,
                             Tagstyle = tagstyle,
-                            Url = "",
+                            Url = url,
                         };
                     }).ToArray();
 
