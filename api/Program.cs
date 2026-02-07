@@ -37,6 +37,8 @@ var logoutUrl = Environment.GetEnvironmentVariable("DL_LOGOUT_URL");
 var hypervHost = Environment.GetEnvironmentVariable("DL_HYPERV_HOST");
 var hypervUsername = Environment.GetEnvironmentVariable("DL_HYPERV_USERNAME");
 var hypervPassword = Environment.GetEnvironmentVariable("DL_HYPERV_PASSWORD");
+var hypervIcon = Environment.GetEnvironmentVariable("DL_HYPERV_ICON") ?? "fas fa-server";
+var hypervUrlTemplate = Environment.GetEnvironmentVariable("DL_HYPERV_URL");
 
 var deserializer = new DeserializerBuilder()
     .IgnoreUnmatchedProperties()
@@ -237,12 +239,12 @@ app.MapGet(
                         var subtitle = vm.State == "Running" && !string.IsNullOrWhiteSpace(firstIp)
                             ? firstIp
                             : vm.State;
-                        var url = !string.IsNullOrWhiteSpace(firstIp)
-                            ? $"rtsx://rdp%3a%2f%2f{firstIp}?using=uri&credential=HiveVM"
+                        var url = !string.IsNullOrWhiteSpace(firstIp) && !string.IsNullOrWhiteSpace(hypervUrlTemplate)
+                            ? hypervUrlTemplate.Replace("{host}", firstIp).Replace("{name}", vm.Name)
                             : "";
                         return new Item {
                             Name = vm.Name,
-                            Icon = "fas fa-server",
+                            Icon = hypervIcon,
                             Subtitle = subtitle,
                             Tag = vm.State,
                             Tagstyle = tagstyle,
