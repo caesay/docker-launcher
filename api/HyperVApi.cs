@@ -13,6 +13,12 @@ public class HyperVApi
     private readonly string _wsmanUrl;
     private readonly ILogger _logger;
 
+    /// <summary>Null when host is healthy, otherwise a short error description.</summary>
+    public string HostError { get; private set; }
+
+    /// <summary>The hostname/IP portion of the configured host (no scheme/port).</summary>
+    public string HostAddress { get; }
+
     private HyperVVm[] _cache = Array.Empty<HyperVVm>();
     private DateTime _cacheExpiry = DateTime.MinValue;
     private readonly SemaphoreSlim _semaphore = new(1, 1);
@@ -40,6 +46,7 @@ public class HyperVApi
     {
         _logger = logger;
         _wsmanUrl = ParseHostUrl(host);
+        HostAddress = ParseHostAddress(host);
 
         var uri = new Uri(_wsmanUrl);
         var credentialCache = new CredentialCache();
@@ -66,6 +73,16 @@ public class HyperVApi
         return $"{scheme}://{hostname}:{port}";
     }
 
+    private static string ParseHostAddress(string host)
+    {
+        if (host.Contains("://"))
+        {
+            try { return new Uri(host).Host; }
+            catch { return host; }
+        }
+        return host.Split(':')[0];
+    }
+
     public async Task<HyperVVm[]> GetAllVMs()
     {
         if (DateTime.UtcNow < _cacheExpiry)
@@ -83,12 +100,16 @@ public class HyperVApi
                 _logger.LogDebug("Refreshing Hyper-V VM cache from {Url}", _wsmanUrl);
                 var vms = await FetchVMs();
                 _cache = vms;
+                HostError = null;
                 _logger.LogDebug("Hyper-V cache refreshed: {Count} VM(s) returned", vms.Length);
             }
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "Failed to fetch Hyper-V VMs from {Url}, returning stale cache ({Count} VM(s))",
                     _wsmanUrl, _cache.Length);
+                HostError = ex is HttpRequestException httpEx
+                    ? $"HTTP {(int?)httpEx.StatusCode}"
+                    : ex.GetType().Name;
             }
 
             _cacheExpiry = DateTime.UtcNow + CacheTtl;

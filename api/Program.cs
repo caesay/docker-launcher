@@ -39,6 +39,8 @@ var hypervUsername = Environment.GetEnvironmentVariable("DL_HYPERV_USERNAME");
 var hypervPassword = Environment.GetEnvironmentVariable("DL_HYPERV_PASSWORD");
 var hypervIcon = Environment.GetEnvironmentVariable("DL_HYPERV_ICON") ?? "fas fa-server";
 var hypervUrlTemplate = Environment.GetEnvironmentVariable("DL_HYPERV_URL");
+var hypervHostName = Environment.GetEnvironmentVariable("DL_HYPERV_HOST_NAME");
+var hypervHostUrl = Environment.GetEnvironmentVariable("DL_HYPERV_HOST_URL");
 
 var deserializer = new DeserializerBuilder()
     .IgnoreUnmatchedProperties()
@@ -227,31 +229,62 @@ app.MapGet(
         if (hyperv != null && isAdmin) {
             try {
                 var vms = await hyperv.GetAllVMs();
-                if (vms.Length > 0) {
-                    var vmItems = vms.Select(vm => {
-                        var tagstyle = vm.State switch {
-                            "Running" => "is-success",
-                            "Saved" or "Starting" or "Stopping" or "Paused" or "Saving" or "Reset" => "is-warning",
-                            "Off" or "OffCritical" => "is-danger",
-                            _ => "is-info",
-                        };
-                        var firstIp = vm.IPAddress.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).FirstOrDefault();
-                        var subtitle = vm.State == "Running" && !string.IsNullOrWhiteSpace(firstIp)
-                            ? firstIp
-                            : vm.State;
-                        var url = !string.IsNullOrWhiteSpace(firstIp) && !string.IsNullOrWhiteSpace(hypervUrlTemplate)
-                            ? hypervUrlTemplate.Replace("{host}", firstIp).Replace("{name}", vm.Name)
-                            : "";
-                        return new Item {
-                            Name = vm.Name,
-                            Icon = hypervIcon,
-                            Subtitle = subtitle,
-                            Tag = vm.State,
-                            Tagstyle = tagstyle,
-                            Url = url,
-                        };
-                    }).ToArray();
+                var allItems = new List<Item>();
 
+                // Add host server card if configured
+                if (!string.IsNullOrWhiteSpace(hypervHostName)) {
+                    var hostIp = hyperv.HostAddress;
+                    string hostState, hostTagstyle, hostSubtitle;
+                    if (hyperv.HostError == null) {
+                        hostState = "Running";
+                        hostTagstyle = "is-success";
+                        hostSubtitle = hostIp;
+                    } else {
+                        hostState = hyperv.HostError;
+                        hostTagstyle = "is-danger";
+                        hostSubtitle = hyperv.HostError;
+                    }
+                    var hostUrlTpl = hypervHostUrl ?? hypervUrlTemplate;
+                    var hostUrl = !string.IsNullOrWhiteSpace(hostUrlTpl)
+                        ? hostUrlTpl.Replace("{host}", hostIp).Replace("{name}", hypervHostName)
+                        : "";
+                    allItems.Add(new Item {
+                        Name = hypervHostName,
+                        Icon = hypervIcon,
+                        Subtitle = hostSubtitle,
+                        Tag = hostState,
+                        Tagstyle = hostTagstyle,
+                        Url = hostUrl,
+                    });
+                }
+
+                // Add VM cards
+                foreach (var vm in vms) {
+                    var tagstyle = vm.State switch {
+                        "Running" => "is-success",
+                        "Saved" or "Starting" or "Stopping" or "Paused" or "Saving" or "Reset" => "is-warning",
+                        "Off" or "OffCritical" => "is-danger",
+                        _ => "is-info",
+                    };
+                    var firstIp = vm.IPAddress.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).FirstOrDefault();
+                    var subtitle = vm.State == "Running" && !string.IsNullOrWhiteSpace(firstIp)
+                        ? firstIp
+                        : vm.State;
+                    var url = !string.IsNullOrWhiteSpace(firstIp) && !string.IsNullOrWhiteSpace(hypervUrlTemplate)
+                        ? hypervUrlTemplate.Replace("{host}", firstIp).Replace("{name}", vm.Name)
+                        : "";
+                    allItems.Add(new Item {
+                        Name = vm.Name,
+                        Icon = hypervIcon,
+                        Subtitle = subtitle,
+                        Tag = vm.State,
+                        Tagstyle = tagstyle,
+                        Url = url,
+                    });
+                }
+
+                if (allItems.Count > 0) {
+                    var vmItems = allItems.ToArray();
                     var hvService = homerObj.Services.FirstOrDefault(s => s.Name.EqualsNoCase("HyperV"));
                     if (hvService != null) {
                         hvService.Items = (hvService.Items ?? []).Concat(vmItems).ToArray();
