@@ -1,7 +1,7 @@
-using System.Net.Http.Headers;
+using System.Net;
 using System.Text;
 using System.Text.Json;
-using System.Xml.Linq;
+using WinRMSharp;
 
 namespace docker_launcher;
 
@@ -9,7 +9,7 @@ public class HyperVApi
 {
     public record HyperVVm(string Name, string State, string IPAddress);
 
-    private readonly HttpClient _http;
+    private readonly WinRMClient _client;
     private readonly string _wsmanUrl;
     private readonly ILogger _logger;
 
@@ -41,16 +41,13 @@ public class HyperVApi
         _logger = logger;
         _wsmanUrl = ParseHostUrl(host);
 
-        var handler = new HttpClientHandler();
-        if (_wsmanUrl.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+        var credentials = new NetworkCredential(username, password);
+        var options = new WinRMClientOptions
         {
-            handler.ServerCertificateCustomValidationCallback = (_, _, _, _) => true;
-        }
-
-        _http = new HttpClient(handler);
-        _http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(
-            "Basic", Convert.ToBase64String(Encoding.UTF8.GetBytes($"{username}:{password}")));
-        _http.Timeout = TimeSpan.FromSeconds(15);
+            ReadTimeout = TimeSpan.FromSeconds(15),
+            OperationTimeout = TimeSpan.FromSeconds(60),
+        };
+        _client = new WinRMClient(_wsmanUrl, credentials, options);
 
         _logger.LogInformation("Hyper-V integration initialized for {Url}", _wsmanUrl);
     }
@@ -64,7 +61,7 @@ public class HyperVApi
         var hostname = parts[0];
         var port = parts.Length > 1 && int.TryParse(parts[1], out var p) ? p : 5985;
         var scheme = port == 5986 ? "https" : "http";
-        return $"{scheme}://{hostname}:{port}/wsman";
+        return $"{scheme}://{hostname}:{port}";
     }
 
     public async Task<HyperVVm[]> GetAllVMs()
@@ -106,42 +103,22 @@ public class HyperVApi
         var ps = "Get-VM | Select-Object Name, State, @{N='IPAddress'; E={($_.NetworkAdapters.IPAddresses -join ', ')}} | ConvertTo-Json";
         var encodedCommand = Convert.ToBase64String(Encoding.Unicode.GetBytes(ps));
 
-        string shellId = null;
-        try
-        {
-            shellId = await CreateShell();
-            _logger.LogDebug("WinRM shell created: {ShellId}", shellId);
+        _logger.LogDebug("Executing PowerShell command via WinRM");
 
-            var commandId = await ExecuteCommand(shellId, encodedCommand);
-            _logger.LogDebug("WinRM command started: {CommandId} in shell {ShellId}", commandId, shellId);
+        var result = await _client.RunCommand("powershell.exe", ["-EncodedCommand", encodedCommand]);
 
-            try
-            {
-                var (stdout, stderr) = await ReceiveOutput(shellId, commandId);
-                await SignalTerminate(shellId, commandId);
+        _logger.LogDebug("WinRM command completed with exit code {ExitCode}", result.StatusCode);
 
-                if (!string.IsNullOrWhiteSpace(stderr))
-                    _logger.LogWarning("Hyper-V PowerShell stderr: {Stderr}", stderr);
+        if (!string.IsNullOrWhiteSpace(result.Stderr))
+            _logger.LogWarning("Hyper-V PowerShell stderr: {Stderr}", result.Stderr);
 
-                _logger.LogDebug("Hyper-V PowerShell stdout ({Length} chars): {Output}",
-                    stdout.Length, stdout.Length > 500 ? stdout[..500] + "..." : stdout);
+        _logger.LogDebug("Hyper-V PowerShell stdout ({Length} chars): {Output}",
+            result.Stdout.Length, result.Stdout.Length > 500 ? result.Stdout[..500] + "..." : result.Stdout);
 
-                return ParseVmJson(stdout);
-            }
-            finally
-            {
-                try { await SignalTerminate(shellId, commandId); }
-                catch (Exception ex) { _logger.LogDebug(ex, "WinRM signal terminate failed (may already be done)"); }
-            }
-        }
-        finally
-        {
-            if (shellId != null)
-            {
-                try { await DeleteShell(shellId); }
-                catch (Exception ex) { _logger.LogWarning(ex, "Failed to delete WinRM shell {ShellId}, it may leak on the host", shellId); }
-            }
-        }
+        if (result.StatusCode != 0)
+            _logger.LogWarning("Hyper-V PowerShell exited with non-zero status {ExitCode}", result.StatusCode);
+
+        return ParseVmJson(result.Stdout);
     }
 
     private HyperVVm[] ParseVmJson(string output)
@@ -197,224 +174,5 @@ public class HyperVApi
 
             return vms.ToArray();
         }
-    }
-
-    // WinRM SOAP helpers
-
-    private static readonly XNamespace Soap = "http://www.w3.org/2003/05/soap-envelope";
-    private static readonly XNamespace Wsman = "http://schemas.dmtf.org/wbem/wsman/1/wsman.xsd";
-    private static readonly XNamespace Wsa = "http://schemas.xmlsoap.org/ws/2004/08/addressing";
-    private static readonly XNamespace Rsp = "http://schemas.microsoft.com/wbem/wsman/1/windows/shell";
-
-    private async Task<string> PostSoap(string body, [System.Runtime.CompilerServices.CallerMemberName] string caller = "")
-    {
-        var content = new StringContent(body, Encoding.UTF8, "application/soap+xml");
-        HttpResponseMessage response;
-        try
-        {
-            response = await _http.PostAsync(_wsmanUrl, content);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "WinRM connection failed during {Step} to {Url}", caller, _wsmanUrl);
-            throw;
-        }
-
-        if (!response.IsSuccessStatusCode)
-        {
-            var responseBody = await response.Content.ReadAsStringAsync();
-            _logger.LogError("WinRM {Step} returned HTTP {StatusCode}: {Body}",
-                caller, (int)response.StatusCode,
-                responseBody.Length > 1000 ? responseBody[..1000] + "..." : responseBody);
-            response.EnsureSuccessStatusCode(); // throw
-        }
-
-        return await response.Content.ReadAsStringAsync();
-    }
-
-    private async Task<string> CreateShell()
-    {
-        var soap = $@"<?xml version=""1.0"" encoding=""UTF-8""?>
-<s:Envelope xmlns:s=""http://www.w3.org/2003/05/soap-envelope""
-            xmlns:wsa=""http://schemas.xmlsoap.org/ws/2004/08/addressing""
-            xmlns:wsman=""http://schemas.dmtf.org/wbem/wsman/1/wsman.xsd""
-            xmlns:rsp=""http://schemas.microsoft.com/wbem/wsman/1/windows/shell"">
-  <s:Header>
-    <wsa:To>{_wsmanUrl}</wsa:To>
-    <wsman:ResourceURI s:mustUnderstand=""true"">http://schemas.microsoft.com/wbem/wsman/1/windows/shell/cmd</wsman:ResourceURI>
-    <wsa:ReplyTo>
-      <wsa:Address s:mustUnderstand=""true"">http://schemas.xmlsoap.org/ws/2004/08/addressing/role/anonymous</wsa:Address>
-    </wsa:ReplyTo>
-    <wsa:Action s:mustUnderstand=""true"">http://schemas.xmlsoap.org/ws/2004/09/transfer/Create</wsa:Action>
-    <wsman:MaxEnvelopeSize s:mustUnderstand=""true"">153600</wsman:MaxEnvelopeSize>
-    <wsman:OperationTimeout>PT60S</wsman:OperationTimeout>
-  </s:Header>
-  <s:Body>
-    <rsp:Shell>
-      <rsp:OutputStreams>stdout stderr</rsp:OutputStreams>
-    </rsp:Shell>
-  </s:Body>
-</s:Envelope>";
-
-        var xml = XDocument.Parse(await PostSoap(soap));
-        var shellId = xml.Descendants(Rsp + "ShellId").FirstOrDefault()?.Value
-            ?? xml.Descendants(Rsp + "Shell").Attributes("ShellId").FirstOrDefault()?.Value;
-
-        if (string.IsNullOrEmpty(shellId))
-            throw new InvalidOperationException("Failed to create WinRM shell: no ShellId in response");
-
-        return shellId;
-    }
-
-    private async Task<string> ExecuteCommand(string shellId, string encodedCommand)
-    {
-        var soap = $@"<?xml version=""1.0"" encoding=""UTF-8""?>
-<s:Envelope xmlns:s=""http://www.w3.org/2003/05/soap-envelope""
-            xmlns:wsa=""http://schemas.xmlsoap.org/ws/2004/08/addressing""
-            xmlns:wsman=""http://schemas.dmtf.org/wbem/wsman/1/wsman.xsd""
-            xmlns:rsp=""http://schemas.microsoft.com/wbem/wsman/1/windows/shell"">
-  <s:Header>
-    <wsa:To>{_wsmanUrl}</wsa:To>
-    <wsman:ResourceURI s:mustUnderstand=""true"">http://schemas.microsoft.com/wbem/wsman/1/windows/shell/cmd</wsman:ResourceURI>
-    <wsa:ReplyTo>
-      <wsa:Address s:mustUnderstand=""true"">http://schemas.xmlsoap.org/ws/2004/08/addressing/role/anonymous</wsa:Address>
-    </wsa:ReplyTo>
-    <wsa:Action s:mustUnderstand=""true"">http://schemas.microsoft.com/wbem/wsman/1/windows/shell/Command</wsa:Action>
-    <wsman:MaxEnvelopeSize s:mustUnderstand=""true"">153600</wsman:MaxEnvelopeSize>
-    <wsman:OperationTimeout>PT60S</wsman:OperationTimeout>
-    <wsman:SelectorSet>
-      <wsman:Selector Name=""ShellId"">{shellId}</wsman:Selector>
-    </wsman:SelectorSet>
-  </s:Header>
-  <s:Body>
-    <rsp:CommandLine>
-      <rsp:Command>powershell.exe</rsp:Command>
-      <rsp:Arguments>-EncodedCommand {encodedCommand}</rsp:Arguments>
-    </rsp:CommandLine>
-  </s:Body>
-</s:Envelope>";
-
-        var xml = XDocument.Parse(await PostSoap(soap));
-        var commandId = xml.Descendants(Rsp + "CommandId").FirstOrDefault()?.Value;
-
-        if (string.IsNullOrEmpty(commandId))
-            throw new InvalidOperationException("Failed to execute WinRM command: no CommandId in response");
-
-        return commandId;
-    }
-
-    private async Task<(string stdout, string stderr)> ReceiveOutput(string shellId, string commandId)
-    {
-        var stdout = new StringBuilder();
-        var stderr = new StringBuilder();
-        var receiveCount = 0;
-
-        while (true)
-        {
-            receiveCount++;
-            var soap = $@"<?xml version=""1.0"" encoding=""UTF-8""?>
-<s:Envelope xmlns:s=""http://www.w3.org/2003/05/soap-envelope""
-            xmlns:wsa=""http://schemas.xmlsoap.org/ws/2004/08/addressing""
-            xmlns:wsman=""http://schemas.dmtf.org/wbem/wsman/1/wsman.xsd""
-            xmlns:rsp=""http://schemas.microsoft.com/wbem/wsman/1/windows/shell"">
-  <s:Header>
-    <wsa:To>{_wsmanUrl}</wsa:To>
-    <wsman:ResourceURI s:mustUnderstand=""true"">http://schemas.microsoft.com/wbem/wsman/1/windows/shell/cmd</wsman:ResourceURI>
-    <wsa:ReplyTo>
-      <wsa:Address s:mustUnderstand=""true"">http://schemas.xmlsoap.org/ws/2004/08/addressing/role/anonymous</wsa:Address>
-    </wsa:ReplyTo>
-    <wsa:Action s:mustUnderstand=""true"">http://schemas.microsoft.com/wbem/wsman/1/windows/shell/Receive</wsa:Action>
-    <wsman:MaxEnvelopeSize s:mustUnderstand=""true"">153600</wsman:MaxEnvelopeSize>
-    <wsman:OperationTimeout>PT60S</wsman:OperationTimeout>
-    <wsman:SelectorSet>
-      <wsman:Selector Name=""ShellId"">{shellId}</wsman:Selector>
-    </wsman:SelectorSet>
-  </s:Header>
-  <s:Body>
-    <rsp:Receive>
-      <rsp:DesiredStream CommandId=""{commandId}"">stdout stderr</rsp:DesiredStream>
-    </rsp:Receive>
-  </s:Body>
-</s:Envelope>";
-
-            var xml = XDocument.Parse(await PostSoap(soap));
-
-            foreach (var stream in xml.Descendants(Rsp + "Stream"))
-            {
-                var streamName = stream.Attribute("Name")?.Value;
-                if (string.IsNullOrEmpty(stream.Value))
-                    continue;
-
-                var decoded = Encoding.UTF8.GetString(Convert.FromBase64String(stream.Value));
-                if (streamName == "stdout")
-                    stdout.Append(decoded);
-                else if (streamName == "stderr")
-                    stderr.Append(decoded);
-            }
-
-            var state = xml.Descendants(Rsp + "CommandState").FirstOrDefault();
-            var stateAttr = state?.Attribute("State")?.Value ?? "";
-            if (stateAttr.Contains("Done"))
-                break;
-        }
-
-        _logger.LogDebug("WinRM receive completed after {Count} round-trip(s)", receiveCount);
-        return (stdout.ToString(), stderr.ToString());
-    }
-
-    private async Task SignalTerminate(string shellId, string commandId)
-    {
-        var soap = $@"<?xml version=""1.0"" encoding=""UTF-8""?>
-<s:Envelope xmlns:s=""http://www.w3.org/2003/05/soap-envelope""
-            xmlns:wsa=""http://schemas.xmlsoap.org/ws/2004/08/addressing""
-            xmlns:wsman=""http://schemas.dmtf.org/wbem/wsman/1/wsman.xsd""
-            xmlns:rsp=""http://schemas.microsoft.com/wbem/wsman/1/windows/shell"">
-  <s:Header>
-    <wsa:To>{_wsmanUrl}</wsa:To>
-    <wsman:ResourceURI s:mustUnderstand=""true"">http://schemas.microsoft.com/wbem/wsman/1/windows/shell/cmd</wsman:ResourceURI>
-    <wsa:ReplyTo>
-      <wsa:Address s:mustUnderstand=""true"">http://schemas.xmlsoap.org/ws/2004/08/addressing/role/anonymous</wsa:Address>
-    </wsa:ReplyTo>
-    <wsa:Action s:mustUnderstand=""true"">http://schemas.microsoft.com/wbem/wsman/1/windows/shell/Signal</wsa:Action>
-    <wsman:MaxEnvelopeSize s:mustUnderstand=""true"">153600</wsman:MaxEnvelopeSize>
-    <wsman:OperationTimeout>PT60S</wsman:OperationTimeout>
-    <wsman:SelectorSet>
-      <wsman:Selector Name=""ShellId"">{shellId}</wsman:Selector>
-    </wsman:SelectorSet>
-  </s:Header>
-  <s:Body>
-    <rsp:Signal CommandId=""{commandId}"">
-      <rsp:Code>http://schemas.microsoft.com/wbem/wsman/1/windows/shell/signal/terminate</rsp:Code>
-    </rsp:Signal>
-  </s:Body>
-</s:Envelope>";
-
-        await PostSoap(soap);
-    }
-
-    private async Task DeleteShell(string shellId)
-    {
-        var soap = $@"<?xml version=""1.0"" encoding=""UTF-8""?>
-<s:Envelope xmlns:s=""http://www.w3.org/2003/05/soap-envelope""
-            xmlns:wsa=""http://schemas.xmlsoap.org/ws/2004/08/addressing""
-            xmlns:wsman=""http://schemas.dmtf.org/wbem/wsman/1/wsman.xsd""
-            xmlns:rsp=""http://schemas.microsoft.com/wbem/wsman/1/windows/shell"">
-  <s:Header>
-    <wsa:To>{_wsmanUrl}</wsa:To>
-    <wsman:ResourceURI s:mustUnderstand=""true"">http://schemas.microsoft.com/wbem/wsman/1/windows/shell/cmd</wsman:ResourceURI>
-    <wsa:ReplyTo>
-      <wsa:Address s:mustUnderstand=""true"">http://schemas.xmlsoap.org/ws/2004/08/addressing/role/anonymous</wsa:Address>
-    </wsa:ReplyTo>
-    <wsa:Action s:mustUnderstand=""true"">http://schemas.xmlsoap.org/ws/2004/09/transfer/Delete</wsa:Action>
-    <wsman:MaxEnvelopeSize s:mustUnderstand=""true"">153600</wsman:MaxEnvelopeSize>
-    <wsman:OperationTimeout>PT60S</wsman:OperationTimeout>
-    <wsman:SelectorSet>
-      <wsman:Selector Name=""ShellId"">{shellId}</wsman:Selector>
-    </wsman:SelectorSet>
-  </s:Header>
-  <s:Body/>
-</s:Envelope>";
-
-        await PostSoap(soap);
     }
 }
