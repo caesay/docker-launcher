@@ -41,13 +41,15 @@ public class HyperVApi
         _logger = logger;
         _wsmanUrl = ParseHostUrl(host);
 
-        var credentials = new NetworkCredential(username, password);
+        var uri = new Uri(_wsmanUrl);
+        var credentialCache = new CredentialCache();
+        credentialCache.Add(uri, "Basic", new NetworkCredential(username, password));
         var options = new WinRMClientOptions
         {
             ReadTimeout = TimeSpan.FromSeconds(15),
             OperationTimeout = TimeSpan.FromSeconds(60),
         };
-        _client = new WinRMClient(_wsmanUrl, credentials, options);
+        _client = new WinRMClient(uri, credentialCache, options);
 
         _logger.LogInformation("Hyper-V integration initialized for {Url}", _wsmanUrl);
     }
