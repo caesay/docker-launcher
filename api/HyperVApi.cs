@@ -5,13 +5,15 @@ using WinRMSharp;
 
 namespace docker_launcher;
 
-public class HyperVApi
+public class HyperVApi : IDisposable
 {
     public record HyperVVm(string Name, string State, string IPAddress);
 
     private readonly WinRMClient _client;
     private readonly string _wsmanUrl;
     private readonly ILogger _logger;
+    private readonly CancellationTokenSource _cts = new();
+    private readonly Task _pollTask;
 
     /// <summary>Null when host is healthy, otherwise a short error description.</summary>
     public string HostError { get; private set; }
@@ -19,11 +21,9 @@ public class HyperVApi
     /// <summary>The hostname/IP portion of the configured host (no scheme/port).</summary>
     public string HostAddress { get; }
 
-    private HyperVVm[] _cache = Array.Empty<HyperVVm>();
-    private DateTime _cacheExpiry = DateTime.MinValue;
-    private readonly SemaphoreSlim _semaphore = new(1, 1);
+    private volatile HyperVVm[] _cache = Array.Empty<HyperVVm>();
 
-    private static readonly TimeSpan CacheTtl = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(30);
 
     private static readonly Dictionary<int, string> StateMap = new()
     {
@@ -59,6 +59,7 @@ public class HyperVApi
         _client = new WinRMClient(uri, credentialCache, options);
 
         _logger.LogInformation("Hyper-V integration initialized for {Url}", _wsmanUrl);
+        _pollTask = Task.Run(() => PollLoop(_cts.Token));
     }
 
     private static string ParseHostUrl(string host)
@@ -83,18 +84,16 @@ public class HyperVApi
         return host.Split(':')[0];
     }
 
-    public async Task<HyperVVm[]> GetAllVMs()
+    /// <summary>Returns the last cached VM list. Never blocks on WinRM.</summary>
+    public HyperVVm[] GetAllVMs() => _cache;
+
+    private async Task PollLoop(CancellationToken ct)
     {
-        if (DateTime.UtcNow < _cacheExpiry)
-            return _cache;
+        // small initial delay to not block startup
+        await Task.Delay(TimeSpan.FromSeconds(1), ct);
 
-        await _semaphore.WaitAsync();
-        try
+        while (!ct.IsCancellationRequested)
         {
-            // double-check after acquiring lock
-            if (DateTime.UtcNow < _cacheExpiry)
-                return _cache;
-
             try
             {
                 _logger.LogDebug("Refreshing Hyper-V VM cache from {Url}", _wsmanUrl);
@@ -103,21 +102,23 @@ public class HyperVApi
                 HostError = null;
                 _logger.LogDebug("Hyper-V cache refreshed: {Count} VM(s) returned", vms.Length);
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                _logger.LogWarning(ex, "Failed to fetch Hyper-V VMs from {Url}, returning stale cache ({Count} VM(s))",
+                _logger.LogWarning(ex, "Failed to fetch Hyper-V VMs from {Url}, keeping stale cache ({Count} VM(s))",
                     _wsmanUrl, _cache.Length);
                 HostError = ex is HttpRequestException httpEx
                     ? $"HTTP {(int?)httpEx.StatusCode}"
                     : ex.GetType().Name;
             }
 
-            _cacheExpiry = DateTime.UtcNow + CacheTtl;
-            return _cache;
-        }
-        finally
-        {
-            _semaphore.Release();
+            try
+            {
+                await Task.Delay(PollInterval, ct);
+            }
+            catch (OperationCanceledException)
+            {
+                break;
+            }
         }
     }
 
@@ -197,5 +198,11 @@ public class HyperVApi
 
             return vms.ToArray();
         }
+    }
+
+    public void Dispose()
+    {
+        _cts.Cancel();
+        _cts.Dispose();
     }
 }

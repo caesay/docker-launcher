@@ -228,7 +228,7 @@ app.MapGet(
         // Inject Hyper-V VMs for admin users
         if (hyperv != null && isAdmin) {
             try {
-                var vms = await hyperv.GetAllVMs();
+                var vms = hyperv.GetAllVMs();
                 var allItems = new List<Item>();
 
                 // Add host server card if configured
