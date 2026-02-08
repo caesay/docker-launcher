@@ -416,6 +416,10 @@ public partial class Item
     /// </summary>
     [JsonProperty("onlyUsers", NullValueHandling = NullValueHandling.Ignore)]
     public string OnlyUsers { get; set; }
+
+    /// <summary>Internal sort priority (lower = first). Not serialized.</summary>
+    [JsonIgnore]
+    public int SortOrder { get; set; } = 1;
 }
 
 /// <summary>

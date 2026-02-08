@@ -41,6 +41,7 @@ var hypervIcon = Environment.GetEnvironmentVariable("DL_HYPERV_ICON") ?? "fas fa
 var hypervUrlTemplate = Environment.GetEnvironmentVariable("DL_HYPERV_URL");
 var hypervHostName = Environment.GetEnvironmentVariable("DL_HYPERV_HOST_NAME");
 var hypervHostUrl = Environment.GetEnvironmentVariable("DL_HYPERV_HOST_URL");
+var hypervHostIcon = Environment.GetEnvironmentVariable("DL_HYPERV_HOST_ICON") ?? "fas fa-network-wired";
 
 var deserializer = new DeserializerBuilder()
     .IgnoreUnmatchedProperties()
@@ -250,16 +251,17 @@ app.MapGet(
                         : "";
                     allItems.Add(new Item {
                         Name = hypervHostName,
-                        Icon = hypervIcon,
+                        Icon = hypervHostIcon,
                         Subtitle = hostSubtitle,
                         Tag = hostState,
                         Tagstyle = hostTagstyle,
                         Url = hostUrl,
+                        SortOrder = 0,
                     });
                 }
 
-                // Add VM cards
-                foreach (var vm in vms) {
+                // Add VM cards (sorted alphabetically)
+                foreach (var vm in vms.OrderBy(v => v.Name, StringComparer.OrdinalIgnoreCase)) {
                     var tagstyle = vm.State switch {
                         "Running" => "is-success",
                         "Saved" or "Starting" or "Stopping" or "Paused" or "Saving" or "Reset" => "is-warning",
@@ -327,7 +329,7 @@ app.MapGet(
                           String.IsNullOrWhiteSpace(item.OnlyUsers) ||
                           item.OnlyUsers.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
                               .Any(u => u.EqualsNoCase(authenticatedUser))
-                    orderby item.Name
+                    orderby item.SortOrder, item.Name
                     select item;
 
                 s.Items = query.ToArray();
