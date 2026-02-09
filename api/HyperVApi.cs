@@ -124,12 +124,12 @@ public class HyperVApi : IDisposable
 
     private async Task<HyperVVm[]> FetchVMs()
     {
-        var ps = "Get-VM | Select-Object Name, State, @{N='IPAddress'; E={($_.NetworkAdapters.IPAddresses -join ', ')}} | ConvertTo-Json";
+        var ps = "$ProgressPreference = 'SilentlyContinue'; Get-VM | Select-Object Name, State, @{N='IPAddress'; E={($_.NetworkAdapters.IPAddresses -join ', ')}} | ConvertTo-Json";
         var encodedCommand = Convert.ToBase64String(Encoding.Unicode.GetBytes(ps));
 
         _logger.LogDebug("Executing PowerShell command via WinRM");
 
-        var result = await _client.RunCommand("powershell.exe", ["-EncodedCommand", encodedCommand]);
+        var result = await _client.RunCommand("powershell.exe", ["-NoProfile", "-EncodedCommand", encodedCommand]);
 
         _logger.LogDebug("WinRM command completed with exit code {ExitCode}", result.StatusCode);
 
