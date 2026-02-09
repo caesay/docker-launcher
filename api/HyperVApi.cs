@@ -7,7 +7,7 @@ namespace docker_launcher;
 
 public class HyperVApi : IDisposable
 {
-    public record HyperVVm(string Name, string State, string IPAddress);
+    public record HyperVVm(string Name, string State, string IPAddress, string VhdPath, string VagrantId, bool IsLinux);
 
     private readonly WinRMClient _client;
     private readonly string _wsmanUrl;
@@ -22,6 +22,7 @@ public class HyperVApi : IDisposable
     public string HostAddress { get; }
 
     private volatile HyperVVm[] _cache = Array.Empty<HyperVVm>();
+    private volatile Dictionary<string, string> _vagrantIdCache = new(StringComparer.OrdinalIgnoreCase);
 
     private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(30);
 
@@ -87,6 +88,12 @@ public class HyperVApi : IDisposable
     /// <summary>Returns the last cached VM list. Never blocks on WinRM.</summary>
     public HyperVVm[] GetAllVMs() => _cache;
 
+    /// <summary>Returns a VM by name from the cache, or null if not found.</summary>
+    public HyperVVm GetVM(string name) => _cache.FirstOrDefault(v => v.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>Returns the vagrant ID for a VM, or null if not found.</summary>
+    public string GetVagrantId(string name) => _vagrantIdCache.TryGetValue(name, out var id) ? id : null;
+
     private async Task PollLoop(CancellationToken ct)
     {
         // small initial delay to not block startup
@@ -98,7 +105,21 @@ public class HyperVApi : IDisposable
             {
                 _logger.LogDebug("Refreshing Hyper-V VM cache from {Url}", _wsmanUrl);
                 var vms = await FetchVMs();
-                _cache = vms;
+
+                // Fetch vagrant global-status to map VM names to vagrant IDs
+                try
+                {
+                    var vagrantOutput = await ExecuteCommand("vagrant global-status");
+                    _vagrantIdCache = ParseVagrantStatus(vagrantOutput);
+                    _logger.LogDebug("Vagrant cache refreshed: {Count} VM(s) mapped", _vagrantIdCache.Count);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to fetch vagrant global-status, keeping stale vagrant cache");
+                }
+
+                // Merge vagrant IDs into VM records
+                _cache = vms.Select(vm => vm with { VagrantId = GetVagrantId(vm.Name) }).ToArray();
                 HostError = null;
                 _logger.LogDebug("Hyper-V cache refreshed: {Count} VM(s) returned", vms.Length);
             }
@@ -124,7 +145,7 @@ public class HyperVApi : IDisposable
 
     private async Task<HyperVVm[]> FetchVMs()
     {
-        var ps = "$ProgressPreference = 'SilentlyContinue'; Get-VM | Select-Object Name, State, @{N='IPAddress'; E={($_.NetworkAdapters.IPAddresses -join ', ')}} | ConvertTo-Json";
+        var ps = @"$ProgressPreference = 'SilentlyContinue'; Get-VM | Select-Object Name, State, @{N='IPAddress'; E={($_.NetworkAdapters.IPAddresses -join ', ')}}, @{N='VhdPath'; E={(Get-VMHardDiskDrive $_ | Select-Object -First 1).Path}} | ConvertTo-Json";
         var encodedCommand = Convert.ToBase64String(Encoding.Unicode.GetBytes(ps));
 
         _logger.LogDebug("Executing PowerShell command via WinRM");
@@ -143,6 +164,67 @@ public class HyperVApi : IDisposable
             _logger.LogWarning("Hyper-V PowerShell exited with non-zero status {ExitCode}", result.StatusCode);
 
         return ParseVmJson(result.Stdout);
+    }
+
+    /// <summary>Executes a command on the Hyper-V host via WinRM.</summary>
+    public async Task<string> ExecuteCommand(string command)
+    {
+        var encodedCommand = Convert.ToBase64String(Encoding.Unicode.GetBytes(command));
+        var result = await _client.RunCommand("powershell.exe", ["-NoProfile", "-EncodedCommand", encodedCommand]);
+
+        if (result.StatusCode != 0)
+            throw new InvalidOperationException($"Command failed: {result.Stderr}");
+
+        return result.Stdout?.Trim() ?? "";
+    }
+
+    /// <summary>Parses vagrant global-status output to extract VM name to vagrant ID mappings.</summary>
+    private Dictionary<string, string> ParseVagrantStatus(string output)
+    {
+        var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        if (string.IsNullOrWhiteSpace(output))
+            return result;
+
+        var lines = output.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+        var inTable = false;
+
+        foreach (var line in lines)
+        {
+            var trimmed = line.Trim();
+
+            // Skip empty lines and header separator
+            if (string.IsNullOrWhiteSpace(trimmed) || trimmed.StartsWith("-"))
+            {
+                if (trimmed.StartsWith("-"))
+                    inTable = true;
+                continue;
+            }
+
+            // Stop at footer
+            if (trimmed.StartsWith("The above shows"))
+                break;
+
+            if (!inTable)
+                continue;
+
+            // Parse: id name provider state directory
+            var parts = trimmed.Split([' '], StringSplitOptions.RemoveEmptyEntries);
+            if (parts.Length >= 4)
+            {
+                var id = parts[0];
+                var name = parts[1];
+                var provider = parts[2];
+
+                // Only include hyperv provider
+                if (provider.Equals("hyperv", StringComparison.OrdinalIgnoreCase))
+                {
+                    result[name] = id;
+                    _logger.LogDebug("Mapped vagrant VM {Name} to ID {Id}", name, id);
+                }
+            }
+        }
+
+        return result;
     }
 
     private HyperVVm[] ParseVmJson(string output)
@@ -192,8 +274,16 @@ public class HyperVApi : IDisposable
                 if (el.TryGetProperty("IPAddress", out var ipProp) && ipProp.ValueKind == JsonValueKind.String)
                     ip = ipProp.GetString() ?? "";
 
-                _logger.LogDebug("Parsed VM: {Name} State={State} IP={IP}", name, state, ip);
-                vms.Add(new HyperVVm(name, state, ip));
+                var vhdPath = "";
+                if (el.TryGetProperty("VhdPath", out var vhdProp) && vhdProp.ValueKind == JsonValueKind.String)
+                    vhdPath = vhdProp.GetString() ?? "";
+
+                // Determine if Linux based on VHD path not containing "windows"
+                var isLinux = !string.IsNullOrWhiteSpace(vhdPath) &&
+                              !vhdPath.Contains("windows", StringComparison.OrdinalIgnoreCase);
+
+                _logger.LogDebug("Parsed VM: {Name} State={State} IP={IP} VhdPath={VhdPath} IsLinux={IsLinux}", name, state, ip, vhdPath, isLinux);
+                vms.Add(new HyperVVm(name, state, ip, vhdPath, null, isLinux));
             }
 
             return vms.ToArray();

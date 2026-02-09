@@ -37,11 +37,10 @@ var logoutUrl = Environment.GetEnvironmentVariable("DL_LOGOUT_URL");
 var hypervHost = Environment.GetEnvironmentVariable("DL_HYPERV_HOST");
 var hypervUsername = Environment.GetEnvironmentVariable("DL_HYPERV_USERNAME");
 var hypervPassword = Environment.GetEnvironmentVariable("DL_HYPERV_PASSWORD");
-var hypervIcon = Environment.GetEnvironmentVariable("DL_HYPERV_ICON") ?? "fas fa-server";
 var hypervUrlTemplate = Environment.GetEnvironmentVariable("DL_HYPERV_URL");
 var hypervHostName = Environment.GetEnvironmentVariable("DL_HYPERV_HOST_NAME");
 var hypervHostUrl = Environment.GetEnvironmentVariable("DL_HYPERV_HOST_URL");
-var hypervHostIcon = Environment.GetEnvironmentVariable("DL_HYPERV_HOST_ICON") ?? "fas fa-network-wired";
+var vncTemplatePath = Environment.GetEnvironmentVariable("DL_VNC_TEMPLATE");
 
 var deserializer = new DeserializerBuilder()
     .IgnoreUnmatchedProperties()
@@ -251,7 +250,7 @@ app.MapGet(
                         : "";
                     allItems.Add(new Item {
                         Name = hypervHostName,
-                        Icon = hypervHostIcon,
+                        Icon = "fas fa-server",
                         Subtitle = hostSubtitle,
                         Tag = hostState,
                         Tagstyle = hostTagstyle,
@@ -272,12 +271,23 @@ app.MapGet(
                     var subtitle = vm.State == "Running" && !string.IsNullOrWhiteSpace(firstIp)
                         ? firstIp
                         : vm.State;
-                    var url = !string.IsNullOrWhiteSpace(firstIp) && !string.IsNullOrWhiteSpace(hypervUrlTemplate)
-                        ? hypervUrlTemplate.Replace("{host}", firstIp).Replace("{name}", vm.Name)
-                        : "";
+
+                    // Generate URL based on VM type
+                    string url;
+                    if (vm.IsLinux && !string.IsNullOrWhiteSpace(vm.VagrantId)) {
+                        url = $"/vnc?name={Uri.EscapeDataString(vm.Name)}";
+                    } else if (!string.IsNullOrWhiteSpace(firstIp) && !string.IsNullOrWhiteSpace(hypervUrlTemplate)) {
+                        url = hypervUrlTemplate.Replace("{host}", firstIp).Replace("{name}", vm.Name);
+                    } else {
+                        url = "";
+                    }
+
+                    // Use OS-based icons
+                    var vmIcon = vm.IsLinux ? "fa-brands fa-linux" : "fa-brands fa-windows";
+
                     allItems.Add(new Item {
                         Name = vm.Name,
-                        Icon = hypervIcon,
+                        Icon = vmIcon,
                         Subtitle = subtitle,
                         Tag = vm.State,
                         Tagstyle = tagstyle,
@@ -362,6 +372,104 @@ if (!String.IsNullOrEmpty(logoutUrl)) {
 
         // Redirect to the configured logout URL
         return Results.Redirect(logoutUrl, permanent: false);
+    });
+}
+
+// VNC endpoint - generates a .vnc file with one-time password for Linux VMs
+if (hyperv != null) {
+    const string defaultVncTemplate = """
+        [Connection]
+        Host={host}
+        Port=5901
+        Password={password}
+        """;
+
+    app.MapGet("/vnc", async (HttpContext context) => {
+        // Verify admin authentication
+        var authenticatedUser = context.Request.Headers.FirstOrDefault(h => h.Key.EqualsNoCase(userHeaderName)).Value.FirstOrDefault();
+        if (string.IsNullOrWhiteSpace(authenticatedUser)) {
+            context.Response.StatusCode = 401;
+            await context.Response.WriteAsync("Unauthorized");
+            return;
+        }
+
+        var isAdmin = adminEmail != null && authenticatedUser.EqualsNoCase(adminEmail);
+        if (!isAdmin) {
+            context.Response.StatusCode = 403;
+            await context.Response.WriteAsync("Forbidden - Admin access required");
+            return;
+        }
+
+        // Get VM name from query string
+        var name = context.Request.Query["name"].FirstOrDefault();
+        if (string.IsNullOrWhiteSpace(name)) {
+            context.Response.StatusCode = 400;
+            await context.Response.WriteAsync("Missing 'name' parameter");
+            return;
+        }
+
+        // Lookup VM from cache
+        var vm = hyperv.GetVM(name);
+        if (vm == null) {
+            context.Response.StatusCode = 404;
+            await context.Response.WriteAsync($"VM '{name}' not found");
+            return;
+        }
+
+        if (!vm.IsLinux) {
+            context.Response.StatusCode = 400;
+            await context.Response.WriteAsync($"VM '{name}' is not a Linux VM");
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(vm.VagrantId)) {
+            context.Response.StatusCode = 400;
+            await context.Response.WriteAsync($"VM '{name}' has no vagrant ID");
+            return;
+        }
+
+        // Get VM IP address for host substitution
+        var vmIp = vm.IPAddress.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).FirstOrDefault();
+        if (string.IsNullOrWhiteSpace(vmIp)) {
+            context.Response.StatusCode = 400;
+            await context.Response.WriteAsync($"VM '{name}' has no IP address");
+            return;
+        }
+
+        try {
+            // Execute vagrant ssh command to generate OTP
+            var cmd = @"/opt/TurboVNC/bin/vncpasswd -o -display :1 2>&1 | grep -oP '\d+$' | /opt/TurboVNC/bin/vncpasswd -f | xxd -p";
+            var password = await hyperv.ExecuteCommand($"vagrant ssh -c \"{cmd}\" {vm.VagrantId}");
+            password = password.Trim();
+
+            if (string.IsNullOrWhiteSpace(password)) {
+                context.Response.StatusCode = 500;
+                await context.Response.WriteAsync("Failed to generate VNC password");
+                return;
+            }
+
+            // Read template from file or use default
+            string template;
+            if (!string.IsNullOrEmpty(vncTemplatePath) && File.Exists(vncTemplatePath)) {
+                template = await File.ReadAllTextAsync(vncTemplatePath);
+            } else {
+                template = defaultVncTemplate;
+            }
+
+            // Replace placeholders
+            var vncContent = template
+                .Replace("{host}", vmIp)
+                .Replace("{password}", password);
+
+            // Return as downloadable .vnc file
+            context.Response.Headers["Content-Disposition"] = $"attachment; filename=\"{name}.vnc\"";
+            context.Response.ContentType = "application/x-vnc";
+            await context.Response.WriteAsync(vncContent);
+        } catch (Exception ex) {
+            app.Logger.LogError(ex, "Failed to generate VNC file for VM {Name}", name);
+            context.Response.StatusCode = 500;
+            await context.Response.WriteAsync($"Failed to generate VNC file: {ex.Message}");
+        }
     });
 }
 
