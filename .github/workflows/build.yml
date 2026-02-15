@@ -26,9 +26,15 @@ jobs:
       - name: Log in to Docker Hub
         uses: docker/login-action@v3
         with:
-          # registry: registry.hub.docker.com
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       # - name: Build Docker image
       #   run: |
@@ -47,4 +53,10 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           push: true
-          tags: caesay/docker-launcher:latest,caesay/docker-launcher:${{ steps.nbgv-version.outputs.C_VERSION }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+          tags: |
+            caesay/docker-launcher:latest
+            caesay/docker-launcher:${{ steps.nbgv-version.outputs.C_VERSION }}
+            ghcr.io/${{ github.repository }}:latest
+            ghcr.io/${{ github.repository }}:${{ steps.nbgv-version.outputs.C_VERSION }}
